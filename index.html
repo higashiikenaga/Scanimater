@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scanimater</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Audiowide&family=Bebas+Neue&family=Bungee&family=Dela+Gothic+One&family=Michroma&family=Monoton&family=Orbitron:wght@700;900&family=Righteous&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap">
+<style>
+  :root {
+    --bg: #0b0b12;
+    --panel: #14141f;
+    --panel2: #1b1b2a;
+    --line: #2a2a3d;
+    --text: #e6e4f0;
+    --dim: #9491a8;
+    --accent: #ff8a1c;
+    --accentA: #36c5ff;
+    --accentB: #ff3f9a;
+    --ok: #4be38a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.45 "Zen Kaku Gothic New", system-ui, sans-serif; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 400px; height: 100vh; }
+  .stage { display: flex; flex-direction: column; min-width: 0; padding: 14px 16px; gap: 10px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  header h1 { margin: 0; font: 400 22px "Monoton", "Righteous", sans-serif; letter-spacing: .06em;
+    background: linear-gradient(90deg, #36c5ff, #9b2cff, #ff3f9a, #ff8a1c); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  header p { margin: 0; color: var(--dim); font-size: 12px; }
+  .viewport { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: #000;
+    border: 1px solid var(--line); border-radius: 6px; overflow: hidden; position: relative; }
+  .viewport canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .badge { position: absolute; top: 8px; left: 10px; font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    background: rgba(0,0,0,.6); color: var(--dim); pointer-events: none; }
+  .transport { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .transport input[type=range] { flex: 1; min-width: 160px; }
+  .time { font-variant-numeric: tabular-nums; color: var(--dim); min-width: 92px; text-align: right; }
+  .btn { background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; padding: 5px 10px; cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: #4a4a66; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #1a0d00; font-weight: 700; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .keys { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .keys button { background: transparent; border: 0; padding: 6px 12px; cursor: pointer; color: var(--dim); }
+  .keys button.on[data-k=both] { background: #2e2e45; color: var(--text); }
+  .keys button.on[data-k=A] { background: var(--accentA); color: #001520; font-weight: 700; }
+  .keys button.on[data-k=B] { background: var(--accentB); color: #22000f; font-weight: 700; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .hint { color: var(--dim); font-size: 12px; }
+
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 10px 12px 40px; }
+  details { border-bottom: 1px solid var(--line); padding: 4px 0; }
+  summary { cursor: pointer; padding: 6px 0; font-weight: 700; list-style: none; display: flex; justify-content: space-between; }
+  summary::after { content: "＋"; color: var(--dim); }
+  details[open] > summary::after { content: "－"; }
+  .prow { display: grid; grid-template-columns: 1fr 120px 58px; gap: 6px; align-items: center; padding: 2px 0; }
+  .prow label { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+  .prow.anim label { color: var(--text); }
+  .prow.anim label::before { content: "◆ "; color: var(--accentB); font-size: 10px; }
+  .prow input[type=number] { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; font-size: 12px; }
+  .field { display: grid; grid-template-columns: 110px 1fr; gap: 6px; align-items: center; padding: 3px 0; }
+  .field > span { color: var(--dim); }
+  select, textarea, input[type=text], .field input[type=number] { background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; width: 100%; }
+  textarea { resize: vertical; min-height: 54px; }
+  input[type=range] { accent-color: var(--accent); width: 100%; }
+  input[type=color] { width: 100%; height: 26px; background: none; border: 1px solid var(--line); border-radius: 4px; }
+  .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px 0; }
+  .presets .btn { text-align: left; font-size: 12px; white-space: normal; }
+  .export { padding: 8px 0; display: grid; gap: 6px; }
+  .progress { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; }
+  .progress > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accentA), var(--accentB)); }
+  .status { font-size: 12px; color: var(--dim); min-height: 1.4em; }
+  .status a { color: var(--ok); }
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; height: auto; }
+    .viewport { min-height: 56vw; }
+    aside { border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="stage">
+    <header>
+      <h1>SCANIMATER</h1>
+      <p>アナログ・ラスター偏向アニメーション（Scanimate）エミュレーター</p>
+    </header>
+    <div class="viewport" id="viewport">
+      <canvas id="view"></canvas>
+      <div class="badge" id="badge"></div>
+    </div>
+    <div class="transport">
+      <button class="btn" id="rewind" title="先頭へ">⏮</button>
+      <button class="btn primary" id="play" title="再生/停止（Space）">▶ 再生</button>
+      <input type="range" id="scrub" min="0" max="6" step="0.001" value="0">
+      <span class="time" id="time">0.00 / 6.00s</span>
+    </div>
+    <div class="row">
+      <span class="hint">編集キー:</span>
+      <div class="keys" id="keys">
+        <button data-k="both" class="on" title="A と B を同時に動かす（差分は保持）">A+B 共通</button>
+        <button data-k="A" title="アニメーション開始時の状態">A 開始</button>
+        <button data-k="B" title="アニメーション終了時の状態">B 終了</button>
+      </div>
+      <button class="btn" id="copyAB">A→B</button>
+      <button class="btn" id="copyBA">B→A</button>
+      <button class="btn" id="swapAB">A⇄B</button>
+      <span class="hint">◆＝A と B で値が違う（アニメーションする）項目。ラベルをダブルクリックで初期値。</span>
+    </div>
+  </main>
+
+  <aside id="panel">
+    <details open>
+      <summary>プリセット</summary>
+      <div class="presets" id="presets"></div>
+    </details>
+
+    <details open>
+      <summary>原稿（アートワーク）</summary>
+      <div class="field"><span>種類</span>
+        <select id="srcType"><option value="text">文字</option><option value="image">画像ファイル</option><option value="pattern">図形パターン</option></select></div>
+      <div id="srcTextBox">
+        <div class="field"><span>テキスト</span><textarea id="srcText" rows="2"></textarea></div>
+        <div class="field"><span>フォント</span><select id="srcFont"></select></div>
+        <div class="field"><span>スタイル</span>
+          <select id="srcStyle">
+            <option value="fill">塗り</option><option value="outline">輪郭線</option>
+            <option value="fillOutline">塗り＋二重輪郭</option><option value="stripes">横ストライプ</option>
+          </select></div>
+        <div class="field"><span>文字サイズ</span><input type="range" id="srcSize" min="0.08" max="0.9" step="0.005"></div>
+        <div class="field"><span>字間</span><input type="range" id="srcTracking" min="-0.1" max="0.5" step="0.005"></div>
+        <div class="field"><span>行間</span><input type="range" id="srcLineHeight" min="0.7" max="2" step="0.01"></div>
+      </div>
+      <div id="srcImageBox" hidden>
+        <div class="field"><span>画像</span><input type="file" id="srcFile" accept="image/*"></div>
+      </div>
+      <div id="srcPatternBox" hidden>
+        <div class="field"><span>パターン</span>
+          <select id="srcPattern">
+            <option value="stripes">ストライプ</option><option value="circle">同心円</option><option value="star">星</option>
+            <option value="burst">サンバースト</option><option value="grid">グリッド</option><option value="checker">チェッカー</option>
+          </select></div>
+      </div>
+      <div class="field"><span>コントラスト</span><input type="range" id="srcContrast" min="0.5" max="4" step="0.01"></div>
+      <div class="field"><span>ネガ反転</span><input type="checkbox" id="srcInvert" style="width:auto"></div>
+    </details>
+
+    <details open>
+      <summary>タイムライン</summary>
+      <div class="field"><span>クリップ長 (秒)</span><input type="number" id="duration" min="0.5" max="120" step="0.1"></div>
+      <div class="field"><span>A→B 開始 (秒)</span><input type="number" id="animStart" min="0" max="120" step="0.05"></div>
+      <div class="field"><span>A→B 終了 (秒)</span><input type="number" id="animEnd" min="0" max="120" step="0.05"></div>
+      <div class="field"><span>動き方</span>
+        <select id="animMode"><option value="ab">A → B（Bで止まる）</option><option value="aba">A → B → A（往復）</option></select></div>
+      <div class="field"><span>イージング</span>
+        <select id="easing">
+          <option value="linear">リニア（ランプ）</option><option value="in">加速</option><option value="out">減速</option>
+          <option value="inOut">加減速</option><option value="outBack">行き過ぎて戻る</option>
+          <option value="bounce">バウンド</option><option value="elastic">ゴム（弾性）</option>
+        </select></div>
+    </details>
+
+    <details>
+      <summary>走査とカラライザーの方式</summary>
+      <div class="field"><span>走査方向</span>
+        <select id="scanDir"><option value="h">水平ラスター</option><option value="v">垂直ラスター</option></select></div>
+      <div class="field"><span>パレット</span><select id="palette"></select></div>
+      <div class="field"><span>塗り方</span>
+        <select id="colorMode"><option value="bands">階調バンド（実機風）</option><option value="smooth">なめらか</option></select></div>
+      <div class="field"><span>色の折り返し</span>
+        <select id="wrap"><option value="mirror">ミラー</option><option value="repeat">繰り返し</option><option value="clamp">端で止める</option></select></div>
+      <div class="field"><span>背景色</span><input type="color" id="bgColor"></div>
+    </details>
+
+    <div id="paramGroups"></div>
+
+    <details open>
+      <summary>書き出し</summary>
+      <div class="export">
+        <div class="field"><span>画面比</span>
+          <select id="aspect"><option value="16:9">16:9</option><option value="4:3">4:3（当時の放送）</option></select></div>
+        <div class="field"><span>解像度</span><select id="resolution"></select></div>
+        <div class="field"><span>フレームレート</span>
+          <select id="fps"><option value="24">24</option><option value="29.97">29.97（NTSC）</option><option value="30" selected>30</option><option value="60">60</option></select></div>
+        <div class="field"><span>形式</span>
+          <select id="format"><option value="mp4">MP4（H.264）</option><option value="webm">WebM（VP9）</option></select></div>
+        <div class="field"><span>ビットレート</span>
+          <select id="bitrate"><option value="8">8 Mbps</option><option value="16" selected>16 Mbps</option><option value="30">30 Mbps</option><option value="60">60 Mbps</option></select></div>
+        <div class="field"><span>プレビュー画質</span>
+          <select id="previewQ"><option value="0.5">低（軽い）</option><option value="0.75" selected>中</option><option value="1">高</option></select></div>
+        <div class="row">
+          <button class="btn primary" id="exportBtn">🎬 動画を書き出す</button>
+          <button class="btn" id="cancelBtn" hidden>中止</button>
+          <button class="btn" id="pngBtn">静止画 PNG</button>
+        </div>
+        <div class="progress"><div id="progressBar"></div></div>
+        <div class="status" id="status"></div>
+      </div>
+    </details>
+
+    <details>
+      <summary>プロジェクト</summary>
+      <div class="row" style="padding:6px 0">
+        <button class="btn" id="saveProj">💾 保存（JSON）</button>
+        <label class="btn">📂 読み込み<input type="file" id="loadProj" accept="application/json,.json" hidden></label>
+        <button class="btn" id="resetProj">初期化</button>
+      </div>
+    </details>
+  </aside>
+</div>
+
+<script src="src/muxers.js"></script>
+<script src="src/params.js"></script>
+<script src="src/source.js"></script>
+<script src="src/engine.js"></script>
+<script src="src/app.js"></script>
+</body>
+</html>
