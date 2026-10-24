@@ -25,9 +25,11 @@
         ['posY', '位置 Y', -3, 3, 0.001, 0],
         ['sizeX', 'サイズ X', -3, 3, 0.001, 1],
         ['sizeY', 'サイズ Y', -3, 3, 0.001, 1],
-        ['roll', '回転（Z）°', -720, 720, 0.1, 0],
-        ['tiltX', '前後フリップ（X軸）°', -360, 360, 0.1, 0],
-        ['tiltY', '左右フリップ（Y軸）°', -360, 360, 0.1, 0],
+        ['roll', '回転（Z）°', -1440, 1440, 0.1, 0],
+        ['pivotX', '回転の中心 X', -3, 3, 0.001, 0],
+        ['pivotY', '回転の中心 Y', -3, 3, 0.001, 0],
+        ['tiltX', '前後フリップ（X軸）°', -1080, 1080, 0.1, 0],
+        ['tiltY', '左右フリップ（Y軸）°', -1080, 1080, 0.1, 0],
         ['persp', 'パース', 0, 2, 0.01, 0.7],
         ['taper', 'テーパー', -2, 2, 0.001, 0],
         ['skew', 'スキュー', -2, 2, 0.001, 0],
@@ -125,7 +127,7 @@
   function baseSettings() {
     return {
       scanDir: 'h', palette: 'classic', colorMode: 'bands', wrap: 'mirror', bgColor: '#05051a',
-      duration: 6, animStart: 0.5, animEnd: 4.5, easing: 'inOut', animMode: 'ab',
+      duration: 6,
       source: {
         type: 'text', text: 'SCANIMATE', font: 'Righteous', weight: '700', style: 'fill',
         size: 0.42, tracking: 0.04, lineHeight: 1.05, pattern: 'stripes', invert: false, contrast: 1,
@@ -134,8 +136,32 @@
     };
   }
 
+  /*
+   * キーフレーム: [{ t: 秒, ease: 次のキーまでのイージング, v: { パラメータ } }]
+   * 旧形式（A/B の2点＋開始/終了時刻）からの変換にも使う。
+   */
+  function keysFromAB(A, B, o) {
+    const s = o.animStart ?? 0.5, e = Math.max(s + 0.01, o.animEnd ?? 4.5), ease = o.easing || 'inOut';
+    const a = Object.assign(baseKey(), A), b = Object.assign(baseKey(), B);
+    if (o.animMode === 'aba') {
+      return [{ t: s, ease, v: a }, { t: (s + e) / 2, ease, v: b }, { t: e, ease, v: { ...a } }];
+    }
+    return [{ t: s, ease, v: a }, { t: e, ease, v: b }];
+  }
+
   function preset(name, settings, a, b) {
-    return { name, settings, A: Object.assign(baseKey(), a), B: Object.assign(baseKey(), a, b) };
+    const { animStart, animEnd, easing, animMode, ...rest } = settings;
+    return { name, settings: rest, keys: keysFromAB(a, Object.assign({}, a, b), { animStart, animEnd, easing, animMode }) };
+  }
+
+  // 複数キーのプリセット。各キーの値は前のキーからの差分で書く
+  function presetKeys(name, settings, base, list) {
+    let cur = Object.assign(baseKey(), base);
+    const keys = list.map(([t, ease, diff]) => {
+      cur = Object.assign({}, cur, diff);
+      return { t, ease, v: { ...cur } };
+    });
+    return { name, settings, keys };
   }
 
   const PRESETS = [
@@ -145,6 +171,24 @@
     preset('フライング・ロゴ（奥から手前へ）', { palette: 'chrome', easing: 'out', animStart: 0.2, animEnd: 4 },
       { tiltX: 88, tiltY: -40, sizeX: 0.15, sizeY: 0.15, posY: 0.6, echoes: 14, echoDelay: 0.05, echoFall: 0.84, persist: 0.2, spread: 1.4, cycleSpeed: 0.2 },
       { tiltX: 0, tiltY: 0, sizeX: 1, sizeY: 1, posY: 0 }),
+    presetKeys('回転ロゴ（5キー）', { palette: 'classic', duration: 6.5 },
+      { echoes: 12, echoDelay: 0.035, echoFall: 0.85, persist: 0.2, cycleSpeed: 0.2 }, [
+        [0.0, 'out', { sizeX: 0.08, sizeY: 0.08, tiltY: -540, roll: -90 }],
+        [1.8, 'inOut', { sizeX: 1, sizeY: 1, tiltY: 0, roll: 0 }],
+        [2.6, 'inOut', {}],
+        [4.2, 'outBack', { roll: 360, sizeX: 0.6, sizeY: 0.6, posY: 0.3 }],
+        [5.8, 'in', { tiltX: 90, sizeX: 0.25, sizeY: 0.25, posY: 1.2 }],
+      ]),
+    presetKeys('スイング（回転の中心を左端に）', { palette: 'sunset', duration: 6 },
+      { pivotX: -1.45, echoes: 8, echoDelay: 0.04, echoFall: 0.8, persist: 0.15 }, [
+        [0.2, 'out', { roll: -100 }],
+        [1.4, 'inOut', { roll: 18 }],
+        [2.2, 'inOut', { roll: -9 }],
+        [2.9, 'out', { roll: 4 }],
+        [3.4, 'linear', { roll: 0 }],
+        [4.4, 'in', {}],
+        [5.6, 'linear', { roll: 95, posY: -0.2 }],
+      ]),
     preset('リボン・ツイスト', { palette: 'sunset', animMode: 'aba', easing: 'inOut', animStart: 0, animEnd: 6 },
       { twist: 2.6, twistSpeed: 0.25, echoes: 6, echoDelay: 0.06, echoFall: 0.7, lines: 300, spread: 1.6 },
       { twist: 5.5, sizeX: 1.15 }),
@@ -168,5 +212,5 @@
       { rippleAmp: 0.16 }),
   ];
 
-  global.ScanParams = { GROUPS, DEFS, PHASES, PALETTES, PRESETS, baseKey, baseSettings };
+  global.ScanParams = { GROUPS, DEFS, PHASES, PALETTES, PRESETS, baseKey, baseSettings, keysFromAB };
 })(window);
