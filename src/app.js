@@ -1,12 +1,13 @@
 (function () {
   'use strict';
-  const { GROUPS, DEFS, PHASES, PALETTES, PRESETS, baseKey, baseSettings } = window.ScanParams;
+  const { GROUPS, DEFS, PHASES, PALETTES, PRESETS, baseKey, baseSettings, keysFromAB } = window.ScanParams;
   const $ = (id) => document.getElementById(id);
   const STORE = 'scanimater.project.v1';
 
   // ------------------------------------------------------------ 状態
-  let state = { A: baseKey(), B: baseKey(), settings: baseSettings() };
-  let editKey = 'both';
+  // keys: [{ t: 秒, ease: 次のキーまでのイージング, v: {パラメータ} }]（時刻順）
+  let state = { keys: [], settings: baseSettings() };
+  let sel = 'all'; // 編集対象: 'all'（全キー共通）またはキーの番号
   let image = null;
   let t = 0, playing = true, exporting = null, frozen = false;
 
@@ -34,21 +35,33 @@
     elastic: x => x === 0 || x === 1 ? x : Math.pow(2, -10 * x) * Math.sin((x * 10 - 0.75) * (2 * Math.PI / 3)) + 1,
   };
 
-  function progress(time) {
-    const S = state.settings;
-    const span = Math.max(1e-3, S.animEnd - S.animStart);
-    let x = Math.min(1, Math.max(0, (time - S.animStart) / span));
-    const ease = EASE[S.easing] || EASE.linear;
-    if (S.animMode === 'aba') return x < 0.5 ? ease(x * 2) : ease((1 - x) * 2);
-    return ease(x);
+  const keyName = (i) => i < 26 ? String.fromCharCode(65 + i) : `K${i + 1}`;
+  function sortKeys() { state.keys.sort((a, b) => a.t - b.t); }
+
+  // 時刻 time のキー区間と、その区間内の進み具合（イージング後）
+  function segmentAt(time) {
+    const K = state.keys;
+    if (K.length === 1 || time <= K[0].t) return { i: 0, e: 0 };
+    const last = K.length - 1;
+    if (time >= K[last].t) return { i: last, e: 0 };
+    let i = 0;
+    while (i < last - 1 && time >= K[i + 1].t) i++;
+    const span = K[i + 1].t - K[i].t;
+    const x = span > 1e-6 ? (time - K[i].t) / span : 1;
+    return { i, e: (EASE[K[i].ease] || EASE.linear)(x) };
   }
 
-  function lerpKey(e) {
+  function valueAt(seg, id) {
+    const K = state.keys;
+    const a = K[seg.i].v[id];
+    if (seg.e === 0 || seg.i >= K.length - 1) return a;
+    return a + (K[seg.i + 1].v[id] - a) * seg.e;
+  }
+
+  function valuesAt(time) {
+    const seg = segmentAt(time);
     const P = {};
-    for (const id in DEFS) {
-      const a = state.A[id], b = state.B[id];
-      P[id] = a + (b - a) * e;
-    }
+    for (const id in DEFS) P[id] = valueAt(seg, id);
     return P;
   }
 
@@ -61,8 +74,8 @@
     const h = time / steps;
     let prev = null;
     for (let i = 0; i <= steps; i++) {
-      const e = progress(i * h);
-      const cur = ids.map(id => state.A[id] + (state.B[id] - state.A[id]) * e);
+      const seg = segmentAt(i * h);
+      const cur = ids.map(id => valueAt(seg, id));
       if (prev) ids.forEach((id, k) => { out[PHASES[id]] += (prev[k] + cur[k]) * 0.5 * h; });
       prev = cur;
     }
@@ -70,7 +83,7 @@
   }
 
   function evalAt(time) {
-    const P = lerpKey(progress(time));
+    const P = valuesAt(time);
     Object.assign(P, phasesAt(time));
     P.jitterSeed = P.jitterRate > 0 ? Math.floor(time * P.jitterRate) : 0;
     return P;
@@ -150,7 +163,10 @@
     $('scrub').max = S.duration;
     $('scrub').value = t;
     $('time').textContent = `${t.toFixed(2)} / ${S.duration.toFixed(2)}s`;
-    $('badge').textContent = `プレビュー ${w}×${h} ・ ${fpsAvg.toFixed(0)} fps ・ 進行 ${(progress(t) * 100).toFixed(0)}%`;
+    const seg = segmentAt(t), K = state.keys;
+    const where = t < K[0].t ? `${keyName(0)} の前` : seg.i >= K.length - 1 ? `${keyName(K.length - 1)} 以降` : `${keyName(seg.i)}→${keyName(seg.i + 1)}`;
+    $('badge').textContent = `プレビュー ${w}×${h} ・ ${fpsAvg.toFixed(0)} fps ・ ${where}`;
+    drawPlayhead();
   }
 
   function setPlaying(p) {
@@ -188,16 +204,15 @@
     if (!isFinite(v)) return;
     const d = DEFS[id];
     if (d.int) v = Math.round(v);
-    if (editKey === 'both') {
-      if (absolute) { state.A[id] = v; state.B[id] = v; }
+    if (sel === 'all') {
+      if (absolute) for (const k of state.keys) k.v[id] = v;
       else {
-        // A と B の差を保ったまま両方を動かす
-        const delta = v - state.A[id];
-        state.A[id] = v;
-        state.B[id] += delta;
+        // キー同士の差を保ったまま全キーを動かす
+        const delta = v - state.keys[0].v[id];
+        for (const k of state.keys) k.v[id] += delta;
       }
     } else {
-      state[editKey][id] = v;
+      state.keys[sel].v[id] = v;
     }
     refreshParam(id);
     save();
@@ -205,25 +220,168 @@
 
   function refreshParam(id) {
     const r = rows[id];
-    const key = editKey === 'B' ? 'B' : 'A';
-    const v = state[key][id];
+    const v = state.keys[sel === 'all' ? 0 : sel].v[id];
     r.range.value = v;
     r.num.value = +v.toFixed(4);
-    r.row.classList.toggle('anim', Math.abs(state.A[id] - state.B[id]) > 1e-9);
+    const v0 = state.keys[0].v[id];
+    r.row.classList.toggle('anim', state.keys.some(k => Math.abs(k.v[id] - v0) > 1e-9));
   }
   function refreshAllParams() { for (const id in rows) refreshParam(id); }
 
-  function setEditKey(k) {
-    editKey = k;
-    for (const b of $('keys').children) b.classList.toggle('on', b.dataset.k === k);
-    if (k !== 'both') {
-      // 編集中のキーの姿を見せる
+  // ------------------------------------------------------------ キーフレーム
+  function select(k, seek) {
+    sel = k === 'all' || state.keys.length === 0 ? 'all' : Math.max(0, Math.min(state.keys.length - 1, k));
+    if (sel !== 'all' && seek) {
       setPlaying(false);
-      const S = state.settings;
-      t = k === 'A' ? Math.min(S.animStart, S.duration) : (S.animMode === 'aba' ? (S.animStart + S.animEnd) / 2 : Math.min(S.animEnd, S.duration));
-      engine.reset();
+      t = Math.min(state.keys[sel].t, state.settings.duration);
     }
     refreshAllParams();
+    renderKeybar();
+  }
+
+  function renderKeybar() {
+    const bar = $('keybar');
+    const dur = state.settings.duration;
+    bar.querySelectorAll('.kf').forEach(e => e.remove());
+    state.keys.forEach((k, i) => {
+      const m = document.createElement('button');
+      m.className = 'kf' + (sel === i ? ' on' : '');
+      m.textContent = keyName(i);
+      m.title = `${keyName(i)}: ${k.t.toFixed(2)} 秒（ドラッグで移動）`;
+      m.style.left = `${Math.min(100, k.t / dur * 100)}%`;
+      m.dataset.i = i;
+      bar.appendChild(m);
+    });
+    $('keyAll').classList.toggle('on', sel === 'all');
+    const one = sel !== 'all';
+    $('keyName').textContent = one ? keyName(sel) : '全キー';
+    $('keyTime').disabled = !one;
+    $('keyEase').disabled = !one || sel === state.keys.length - 1;
+    $('keyDel').disabled = !one || state.keys.length <= 1;
+    $('keyDup').disabled = !one;
+    if (one) {
+      $('keyTime').value = +state.keys[sel].t.toFixed(3);
+      $('keyEase').value = state.keys[sel].ease;
+    } else {
+      $('keyTime').value = '';
+    }
+  }
+
+  function drawPlayhead() {
+    $('playhead').style.left = `${Math.min(100, t / state.settings.duration * 100)}%`;
+  }
+
+  function addKey(time) {
+    const v = valuesAt(time);
+    for (const id in DEFS) if (DEFS[id].int) v[id] = Math.round(v[id]);
+    const seg = segmentAt(time);
+    const k = { t: +time.toFixed(3), ease: state.keys[seg.i].ease || 'inOut', v };
+    state.keys.push(k);
+    sortKeys();
+    select(state.keys.indexOf(k), true);
+    save();
+  }
+
+  function bindKeybar() {
+    const bar = $('keybar');
+    const timeFromX = (x) => {
+      const r = bar.getBoundingClientRect();
+      return Math.max(0, Math.min(1, (x - r.left) / r.width)) * state.settings.duration;
+    };
+    let drag = null;
+    bar.addEventListener('pointerdown', (e) => {
+      const m = e.target.closest('.kf');
+      bar.setPointerCapture(e.pointerId);
+      if (m) {
+        const k = state.keys[+m.dataset.i];
+        drag = { k, x0: e.clientX, moved: false };
+        select(+m.dataset.i, true);
+      } else {
+        drag = { seek: true };
+        setPlaying(false);
+        t = timeFromX(e.clientX);
+      }
+    });
+    bar.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      if (drag.seek) { t = timeFromX(e.clientX); return; }
+      if (!drag.moved && Math.abs(e.clientX - drag.x0) < 3) return;
+      drag.moved = true;
+      drag.k.t = +timeFromX(e.clientX).toFixed(3);
+      sortKeys();
+      sel = state.keys.indexOf(drag.k);
+      t = drag.k.t;
+      renderKeybar();
+    });
+    const end = () => { if (drag && drag.moved) save(); drag = null; };
+    bar.addEventListener('pointerup', end);
+    bar.addEventListener('pointercancel', end);
+
+    $('keyAll').addEventListener('click', () => select('all'));
+    $('keyPrev').addEventListener('click', () => {
+      const i = sel === 'all' ? state.keys.length - 1 : (sel - 1 + state.keys.length) % state.keys.length;
+      select(i, true);
+    });
+    $('keyNext').addEventListener('click', () => select(sel === 'all' ? 0 : (sel + 1) % state.keys.length, true));
+    $('keyAdd').addEventListener('click', () => addKey(t));
+    $('keyDup').addEventListener('click', () => {
+      if (sel === 'all') return;
+      const src = state.keys[sel];
+      const k = { t: Math.min(state.settings.duration, +(src.t + 0.5).toFixed(3)), ease: src.ease, v: { ...src.v } };
+      state.keys.push(k);
+      sortKeys();
+      select(state.keys.indexOf(k), true);
+      save();
+    });
+    $('keyDel').addEventListener('click', () => {
+      if (sel === 'all' || state.keys.length <= 1) return;
+      state.keys.splice(sel, 1);
+      select(Math.min(sel, state.keys.length - 1), true);
+      save();
+    });
+    $('keyTime').addEventListener('change', () => {
+      const v = parseFloat($('keyTime').value);
+      if (sel === 'all' || !isFinite(v)) return;
+      const k = state.keys[sel];
+      k.t = Math.max(0, Math.min(state.settings.duration, v));
+      sortKeys();
+      select(state.keys.indexOf(k), true);
+      save();
+    });
+    $('keyEase').addEventListener('input', () => {
+      if (sel === 'all') return;
+      state.keys[sel].ease = $('keyEase').value;
+      save();
+    });
+  }
+
+  // プレビューを直接ドラッグして位置（Shift で回転）を決める
+  function bindViewDrag() {
+    const vp = $('viewport');
+    let drag = null;
+    vp.addEventListener('pointerdown', (e) => {
+      if (exporting) return;
+      vp.setPointerCapture(e.pointerId);
+      const r = vp.getBoundingClientRect();
+      const ar = canvas.width / canvas.height;
+      const contentH = Math.min(r.height, r.width / ar);
+      drag = { x: e.clientX, y: e.clientY, unit: 2 / contentH };
+      vp.classList.add('dragging');
+    });
+    vp.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      drag.x = e.clientX; drag.y = e.clientY;
+      const targets = sel === 'all' ? state.keys : [state.keys[sel]];
+      for (const k of targets) {
+        if (e.shiftKey) k.v.roll += dx * 0.5;
+        else { k.v.posX += dx * drag.unit; k.v.posY -= dy * drag.unit; }
+      }
+      refreshParam('posX'); refreshParam('posY'); refreshParam('roll');
+    });
+    const end = () => { if (drag) save(); drag = null; vp.classList.remove('dragging'); };
+    vp.addEventListener('pointerup', end);
+    vp.addEventListener('pointercancel', end);
   }
 
   // ------------------------------------------------------------ 設定 UI
@@ -259,8 +417,7 @@
     });
 
     const setFields = [
-      ['duration', 'duration', 'num'], ['animStart', 'animStart', 'num'], ['animEnd', 'animEnd', 'num'],
-      ['animMode', 'animMode', 'value'], ['easing', 'easing', 'value'], ['scanDir', 'scanDir', 'value'],
+      ['duration', 'duration', 'num'], ['scanDir', 'scanDir', 'value'],
       ['palette', 'palette', 'value'], ['colorMode', 'colorMode', 'value'], ['wrap', 'wrap', 'value'],
       ['bgColor', 'bgColor', 'value'],
     ];
@@ -270,13 +427,14 @@
         if (kind === 'num' && !isFinite(v)) return;
         S()[key] = v;
         if (key === 'palette') applyPalette();
-        if (key === 'duration' && t > v) t = 0;
+        if (key === 'duration') { if (t > v) t = 0; renderKeybar(); }
         save();
       });
     }
 
     $('aspect').addEventListener('input', () => {
       aspect = $('aspect').value;
+      $('viewport').style.setProperty('--ar', aspect.replace(':', ' / '));
       fillResolutions();
       rebuildSource();
     });
@@ -306,7 +464,7 @@
     $('srcStyle').value = src.style; $('srcSize').value = src.size; $('srcTracking').value = src.tracking;
     $('srcLineHeight').value = src.lineHeight; $('srcPattern').value = src.pattern;
     $('srcContrast').value = src.contrast; $('srcInvert').checked = !!src.invert;
-    for (const k of ['duration', 'animStart', 'animEnd', 'animMode', 'easing', 'scanDir', 'palette', 'colorMode', 'wrap', 'bgColor']) $(k).value = S[k];
+    for (const k of ['duration', 'scanDir', 'palette', 'colorMode', 'wrap', 'bgColor']) $(k).value = S[k];
     showSourceBoxes();
   }
 
@@ -328,14 +486,13 @@
     });
   }
 
+  const cloneKeys = (keys) => keys.map(k => ({ t: k.t, ease: k.ease, v: Object.assign(baseKey(), k.v) }));
+
   function applyPreset(p) {
-    const keepSource = state.settings.source;
-    state.A = Object.assign(baseKey(), p.A);
-    state.B = Object.assign(baseKey(), p.B);
-    state.settings = Object.assign(baseSettings(), p.settings, { source: keepSource });
+    applyPresetSilently(p);
     applyPalette();
     refreshSettingsUI();
-    setEditKey('both');
+    select('all');
     t = 0; engine.reset(); setPlaying(true);
     save();
   }
@@ -349,12 +506,19 @@
     }, 300);
   }
   function loadState(obj) {
-    if (!obj || !obj.A || !obj.B) return false;
-    state.A = Object.assign(baseKey(), obj.A);
-    state.B = Object.assign(baseKey(), obj.B);
-    const base = baseSettings();
-    state.settings = Object.assign(base, obj.settings || {});
-    state.settings.source = Object.assign(baseSettings().source, (obj.settings || {}).source || {});
+    if (!obj) return false;
+    const settings = Object.assign(baseSettings(), obj.settings || {});
+    settings.source = Object.assign(baseSettings().source, (obj.settings || {}).source || {});
+    let keys;
+    if (Array.isArray(obj.keys) && obj.keys.length) keys = cloneKeys(obj.keys);
+    else if (obj.A && obj.B) keys = keysFromAB(obj.A, obj.B, obj.settings || {}); // 旧 A/B 形式
+    else return false;
+    for (const k of keys) { k.t = +k.t || 0; k.ease = k.ease || 'inOut'; }
+    for (const key of ['animStart', 'animEnd', 'easing', 'animMode']) delete settings[key];
+    state.keys = keys;
+    state.settings = settings;
+    sortKeys();
+    sel = 'all';
     return true;
   }
   function restore() {
@@ -366,9 +530,10 @@
   }
   function applyPresetSilently(p) {
     const src = state.settings.source;
-    state.A = Object.assign(baseKey(), p.A);
-    state.B = Object.assign(baseKey(), p.B);
+    state.keys = cloneKeys(p.keys);
     state.settings = Object.assign(baseSettings(), p.settings, { source: src });
+    sortKeys();
+    sel = 'all';
   }
 
   function download(blob, name) {
@@ -555,10 +720,6 @@
     $('play').addEventListener('click', () => setPlaying(!playing));
     $('rewind').addEventListener('click', () => { t = 0; engine.reset(); });
     $('scrub').addEventListener('input', () => { t = parseFloat($('scrub').value); setPlaying(false); });
-    for (const b of $('keys').children) b.addEventListener('click', () => setEditKey(b.dataset.k));
-    $('copyAB').addEventListener('click', () => { state.B = { ...state.A }; refreshAllParams(); save(); });
-    $('copyBA').addEventListener('click', () => { state.A = { ...state.B }; refreshAllParams(); save(); });
-    $('swapAB').addEventListener('click', () => { [state.A, state.B] = [state.B, state.A]; refreshAllParams(); save(); });
     $('exportBtn').addEventListener('click', exportVideo);
     $('cancelBtn').addEventListener('click', () => { if (exporting) exporting.cancel = true; });
     $('pngBtn').addEventListener('click', exportPNG);
@@ -577,12 +738,12 @@
       });
     });
     $('resetProj').addEventListener('click', () => {
-      state = { A: baseKey(), B: baseKey(), settings: baseSettings() };
+      state = { keys: [], settings: baseSettings() };
       applyPresetSilently(PRESETS[0]);
       afterStateChange();
     });
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+      if (e.code === 'Space' && !/INPUT|TEXTAREA|SELECT|BUTTON/.test(document.activeElement.tagName)) {
         e.preventDefault(); setPlaying(!playing);
       }
     });
@@ -592,6 +753,7 @@
     applyPalette();
     refreshSettingsUI();
     refreshAllParams();
+    renderKeybar();
     loadImage(state.settings.source.type === 'image' ? state.settings.source.imageData : null);
     rebuildSource();
     t = 0; engine.reset();
@@ -603,6 +765,9 @@
   buildPresets();
   bindSettings();
   bindTransport();
+  bindKeybar();
+  bindViewDrag();
+  $('viewport').style.setProperty('--ar', aspect.replace(':', ' / '));
   afterStateChange();
   setPlaying(true);
   requestAnimationFrame(frame);

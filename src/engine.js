@@ -29,7 +29,7 @@
   uniform int uLines, uSegs, uVertical;
   uniform vec2 uRes;
   uniform float uAspect, uBeam, uSpacing;
-  uniform vec2 uPos, uSize;
+  uniform vec2 uPos, uSize, uPivot;
   uniform float uRoll, uTiltX, uTiltY, uPersp, uTaper, uSkew;
   uniform vec3 uWaveH, uWaveV, uRipple;
   uniform vec2 uTwist, uBend, uJitter;
@@ -72,9 +72,10 @@
     float x2 = x*cy + z*sy; z = -x*sy + z*cy; x = x2;
     float w = max(1.0 + z*uPersp*0.45, 0.04);
     x /= w; y /= w;
-    // ロール
     float cr = cos(uRoll), sr = sin(uRoll);
-    vec2 p = vec2(x*cr - y*sr, x*sr + y*cr) + uPos;
+    // ロール（回転の中心まわり）
+    vec2 q = vec2(x, y) - uPivot;
+    vec2 p = vec2(q.x*cr - q.y*sr, q.x*sr + q.y*cr) + uPivot + uPos;
     return vec2(p.x/uAspect, p.y);
   }
 
@@ -432,6 +433,7 @@
         gl.uniform1f(u.uSpeedComp, P.speedComp);
         gl.uniform2f(u.uPos, P.posX, P.posY);
         gl.uniform2f(u.uSize, P.sizeX, P.sizeY);
+        gl.uniform2f(u.uPivot, P.pivotX, P.pivotY);
         gl.uniform1f(u.uRoll, P.roll * D2R);
         gl.uniform1f(u.uTiltX, P.tiltX * D2R);
         gl.uniform1f(u.uTiltY, P.tiltY * D2R);
