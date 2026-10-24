@@ -21,6 +21,7 @@
   // ------------------------------------------------------------ 時間評価
   const EASE = {
     linear: x => x,
+    step: x => (x < 1 ? 0 : 1),
     in: x => x * x * x,
     out: x => 1 - Math.pow(1 - x, 3),
     inOut: x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2,
@@ -93,8 +94,16 @@
     const main = evalAt(time);
     const layers = [{ P: main, weight: 1 }];
     const n = Math.round(main.echoes);
+    // 残像の固定: 最後のキーを過ぎたら、その瞬間の残像の形で止める
+    const lastT = state.keys[state.keys.length - 1].t;
+    const base = state.settings.trailHold && time > lastT ? lastT : time;
+    const ang = main.extrudeAngle * Math.PI / 180;
     for (let k = 1; k <= n; k++) {
-      layers.push({ P: evalAt(time - k * main.echoDelay), weight: Math.pow(main.echoFall, k) });
+      const P = evalAt(base - k * main.echoDelay);
+      // 立体の押し出し: k 枚目ほど奥へずらして縮める（時間に依らない）
+      const f = k / n;
+      P.extrudeOff = [main.extrude * f * Math.cos(ang), main.extrude * f * Math.sin(ang), 1 - main.extrudeScale * f];
+      layers.push({ P, weight: Math.pow(main.echoFall, k) });
     }
     return { main, layers };
   }
@@ -417,13 +426,13 @@
     });
 
     const setFields = [
-      ['duration', 'duration', 'num'], ['scanDir', 'scanDir', 'value'],
+      ['duration', 'duration', 'num'], ['trailHold', 'trailHold', 'checked'], ['scanDir', 'scanDir', 'value'],
       ['palette', 'palette', 'value'], ['colorMode', 'colorMode', 'value'], ['wrap', 'wrap', 'value'],
       ['bgColor', 'bgColor', 'value'],
     ];
     for (const [el, key, kind] of setFields) {
       $(el).addEventListener('input', () => {
-        const v = kind === 'num' ? parseFloat($(el).value) : $(el).value;
+        const v = kind === 'num' ? parseFloat($(el).value) : kind === 'checked' ? $(el).checked : $(el).value;
         if (kind === 'num' && !isFinite(v)) return;
         S()[key] = v;
         if (key === 'palette') applyPalette();
@@ -465,6 +474,7 @@
     $('srcLineHeight').value = src.lineHeight; $('srcPattern').value = src.pattern;
     $('srcContrast').value = src.contrast; $('srcInvert').checked = !!src.invert;
     for (const k of ['duration', 'scanDir', 'palette', 'colorMode', 'wrap', 'bgColor']) $(k).value = S[k];
+    $('trailHold').checked = !!S.trailHold;
     showSourceBoxes();
   }
 

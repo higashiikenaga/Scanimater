@@ -30,6 +30,7 @@
   uniform vec2 uRes;
   uniform float uAspect, uBeam, uSpacing;
   uniform vec2 uPos, uSize, uPivot;
+  uniform vec3 uExtrude; // 押し出しコピーのずれ (dx, dy) と縮み
   uniform float uRoll, uTiltX, uTiltY, uPersp, uTaper, uSkew;
   uniform vec3 uWaveH, uWaveV, uRipple;
   uniform vec2 uTwist, uBend, uJitter;
@@ -76,6 +77,7 @@
     // ロール（回転の中心まわり）
     vec2 q = vec2(x, y) - uPivot;
     vec2 p = vec2(q.x*cr - q.y*sr, q.x*sr + q.y*cr) + uPivot + uPos;
+    p = (p - uPos)*uExtrude.z + uPos + uExtrude.xy;
     return vec2(p.x/uAspect, p.y);
   }
 
@@ -432,7 +434,9 @@
         gl.uniform1f(u.uBias, P.bias);
         gl.uniform1f(u.uSpeedComp, P.speedComp);
         gl.uniform2f(u.uPos, P.posX, P.posY);
-        gl.uniform2f(u.uSize, P.sizeX, P.sizeY);
+        gl.uniform2f(u.uSize, P.sizeX * P.scale, P.sizeY * P.scale);
+        const ex = P.extrudeOff || [0, 0, 1];
+        gl.uniform3f(u.uExtrude, ex[0], ex[1], ex[2]);
         gl.uniform2f(u.uPivot, P.pivotX, P.pivotY);
         gl.uniform1f(u.uRoll, P.roll * D2R);
         gl.uniform1f(u.uTiltX, P.tiltX * D2R);
