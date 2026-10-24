@@ -23,6 +23,7 @@
       id: 'xform', title: '偏向（位置・サイズ・回転）', params: [
         ['posX', '位置 X', -3, 3, 0.001, 0],
         ['posY', '位置 Y', -3, 3, 0.001, 0],
+        ['scale', '全体サイズ', 0, 4, 0.001, 1],
         ['sizeX', 'サイズ X', -3, 3, 0.001, 1],
         ['sizeY', 'サイズ Y', -3, 3, 0.001, 1],
         ['roll', '回転（Z）°', -1440, 1440, 0.1, 0],
@@ -56,10 +57,13 @@
     },
     {
       id: 'trails', title: '残像（多重露光・残光）', params: [
-        ['echoes', '多重露光 枚数', 0, 24, 1, 0, true],
+        ['echoes', '多重露光 枚数', 0, 48, 1, 0, true],
         ['echoDelay', '露光間隔 (秒)', 0, 0.5, 0.001, 0.04],
         ['echoFall', '露光減衰', 0, 1, 0.01, 0.85],
         ['persist', '蛍光体残光 (秒)', 0, 3, 0.01, 0.08],
+        ['extrude', '立体 押し出し量', 0, 2, 0.001, 0],
+        ['extrudeAngle', '押し出し方向°', -180, 180, 0.1, -60],
+        ['extrudeScale', '奥行きの縮み', -1, 1, 0.001, 0.12],
       ]
     },
     {
@@ -127,7 +131,7 @@
   function baseSettings() {
     return {
       scanDir: 'h', palette: 'classic', colorMode: 'bands', wrap: 'mirror', bgColor: '#05051a',
-      duration: 6,
+      duration: 6, trailHold: false,
       source: {
         type: 'text', text: 'SCANIMATE', font: 'Righteous', weight: '700', style: 'fill',
         size: 0.42, tracking: 0.04, lineHeight: 1.05, pattern: 'stripes', invert: false, contrast: 1,
@@ -188,6 +192,28 @@
         [3.4, 'linear', { roll: 0 }],
         [4.4, 'in', {}],
         [5.6, 'linear', { roll: 95, posY: -0.2 }],
+      ]),
+    presetKeys('立体ロゴ（押し出し）', { palette: 'classic', duration: 6 },
+      { echoes: 28, echoDelay: 0, echoFall: 0.93, extrudeAngle: -55, extrudeScale: 0.1, persist: 0.1, spread: 1.3 }, [
+        [0.0, 'out', { sizeX: 0.2, sizeY: 0.2, tiltY: -70, extrude: 0 }],
+        [1.8, 'inOut', { sizeX: 1, sizeY: 1, tiltY: 0 }],
+        [3.2, 'inOut', { extrude: 0.45 }],
+        [4.4, 'inOut', {}],
+        [5.6, 'inOut', { extrudeAngle: -125 }],
+      ]),
+    presetKeys('フライイン→残像固定', { palette: 'sunset', duration: 6, trailHold: true },
+      { echoes: 24, echoDelay: 0.04, echoFall: 0.9, persist: 0.1 }, [
+        [0.2, 'linear', { sizeX: 0.05, sizeY: 0.05, posX: 1.6, posY: 1.0, tiltY: 60 }],
+        [2.2, 'linear', { sizeX: 1, sizeY: 1, posX: 0, posY: 0, tiltY: 0 }],
+      ]),
+    presetKeys('サイズ切り替え（瞬時）', { palette: 'neon', duration: 6 },
+      { echoes: 6, echoDelay: 0.05, echoFall: 0.75, persist: 0.2 }, [
+        [0.0, 'step', { scale: 0.45 }],
+        [1.0, 'step', { scale: 1.0 }],
+        [2.0, 'step', { scale: 0.7, roll: -12 }],
+        [3.0, 'step', { scale: 1.3, roll: 0 }],
+        [4.0, 'outBack', { scale: 0.3 }],
+        [5.0, 'linear', { scale: 1.0 }],
       ]),
     preset('リボン・ツイスト', { palette: 'sunset', animMode: 'aba', easing: 'inOut', animStart: 0, animEnd: 6 },
       { twist: 2.6, twistSpeed: 0.25, echoes: 6, echoDelay: 0.06, echoFall: 0.7, lines: 300, spread: 1.6 },
